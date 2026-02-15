@@ -390,18 +390,56 @@ function mapHeaderData(row, mode, staffMap, customerNoteMap, customerMasterMap) 
   const custInfo = customerMasterMap[code] || {};
 
   const ships = {};
-  for (let i = 1; i <= 10; i++) { 
-    // スプレッドシートの列名が半角(出荷日1)か全角(出荷日１)かに関わらず取得できるようにする
-    const sI = String(i);
-    const fI = toFullWidth(sI);
-    
-    ships[`shipDate${i}`] = getVal(`出荷日${i}`) || getVal(`出荷日${fI}`); 
-    ships[`deliveryDate${i}`] = getVal(`納期${i}`) || getVal(`納期${fI}`); 
-    ships[`deliveryTime${i}`] = getVal(`時間帯${i}`) || getVal(`時間帯${fI}`); 
-    // FM列を参照するように変更
-    ships[`informationNo${i}`] = getVal(`FM情報No${i}`) || getVal(`FM情報No${fI}`) || getVal(`情報No${i}`) || getVal(`情報No${fI}`); 
-    ships[`shippingNo${i}`] = getVal(`FM出荷No${i}`) || getVal(`FM出荷No${fI}`) || getVal(`出荷No${i}`) || getVal(`出荷No${fI}`); 
-    ships[`deliveryMethod${i}`] = getVal(`配送方法${i}`) || getVal(`配送方法${fI}`); 
+  
+  // ★JSONカラムからの展開処理 (旧フラット構造を廃止しJSON統合)
+  const jsonVal = getVal('出荷配送詳細(JSON)');
+  let loadedFromJson = false;
+  if (jsonVal) {
+    try {
+      const parsed = JSON.parse(jsonVal);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((item, idx) => {
+          const n = idx + 1;
+          ships[`shipDate${n}`] = item.shipDate || "";
+          ships[`deliveryDate${n}`] = item.deliveryDate || "";
+          ships[`deliveryTime${n}`] = item.deliveryTime || "";
+          ships[`informationNo${n}`] = item.informationNo || "";
+          ships[`shippingNo${n}`] = item.shippingNo || "";
+          ships[`deliveryMethod${n}`] = item.deliveryMethod || "";
+        });
+        loadedFromJson = true;
+      }
+    } catch (e) {
+      // JSONパースエラーは無視
+    }
+  }
+
+  // JSONがない、またはパース失敗時のためのフォールバック(移行期用)
+  if (!loadedFromJson) {
+    for (let i = 1; i <= 10; i++) { 
+      // スプレッドシートの列名が半角(出荷日1)か全角(出荷日１)かに関わらず取得できるようにする
+      const sI = String(i);
+      const fI = toFullWidth(sI);
+      
+      const sd = getVal(`出荷日${i}`) || getVal(`出荷日${fI}`);
+      if(sd) ships[`shipDate${i}`] = sd;
+
+      const dd = getVal(`納期${i}`) || getVal(`納期${fI}`);
+      if(dd) ships[`deliveryDate${i}`] = dd;
+
+      const dt = getVal(`時間帯${i}`) || getVal(`時間帯${fI}`);
+      if(dt) ships[`deliveryTime${i}`] = dt;
+
+      // FM列を参照するように変更
+      const info = getVal(`FM情報No${i}`) || getVal(`FM情報No${fI}`) || getVal(`情報No${i}`) || getVal(`情報No${fI}`);
+      if(info) ships[`informationNo${i}`] = info;
+
+      const shipNo = getVal(`FM出荷No${i}`) || getVal(`FM出荷No${fI}`) || getVal(`出荷No${i}`) || getVal(`出荷No${fI}`);
+      if(shipNo) ships[`shippingNo${i}`] = shipNo;
+
+      const dm = getVal(`配送方法${i}`) || getVal(`配送方法${fI}`);
+      if(dm) ships[`deliveryMethod${i}`] = dm;
+    }
   }
   
   // 担当者コードから担当営業名を解決
@@ -484,7 +522,7 @@ function reverseMapHeader(h) {
     '住所１': h.customerAddress, 
     '会社TEL': h.customerTel, 
     'データステータス': h.dataStatus, 
-    '配送方法': h.deliveryMethod1, 
+    // 個別の '配送方法' 等のカラム書き込みは廃止し、JSONへ統合
     '直送先担当者名': h.shipRep, 
     '直送先TEL': h.shipTel, 
     'レンタルID': h.rentalId, 
@@ -504,38 +542,38 @@ function reverseMapHeader(h) {
     '営業担当者承認': h.approvalCheck?.status === '済' ? '済' : '', 
     '課長承認': h.approvalManager?.status === '済' ? '済' : '', 
     '部長承認': h.approvalDirector?.status === '済' ? '済' : '', 
-    '社長承認': h.approvalPresident?.status === '済' ? '済' : '' 
+    '社長承認': h.approvalPresident?.status === '済' ? '済' : '',
+    '出荷配送詳細(JSON)': '' // 初期化
   };
   
+  // ★JSONへの集約処理
+  const shippingDetails = [];
+  // 最大10行までチェック
   for (let i = 1; i <= 10; i++) { 
-    const sI = String(i);
-    const fI = toFullWidth(sI);
-    if (h[`shipDate${i}`] !== undefined) {
-      b[`出荷日${i}`] = h[`shipDate${i}`]; 
-      b[`出荷日${fI}`] = h[`shipDate${i}`]; 
-    }
-    if (h[`deliveryDate${i}`] !== undefined) {
-      b[`納期${i}`] = h[`deliveryDate${i}`]; 
-      b[`納期${fI}`] = h[`deliveryDate${i}`];
-    }
-    if (h[`deliveryTime${i}`] !== undefined) {
-      b[`時間帯${i}`] = h[`deliveryTime${i}`];
-      b[`時間帯${fI}`] = h[`deliveryTime${i}`];
-    }
-    // 保存先をFM列に変更
-    if (h[`informationNo${i}`] !== undefined) {
-      b[`FM情報No${i}`] = h[`informationNo${i}`];
-      b[`FM情報No${fI}`] = h[`informationNo${i}`];
-    }
-    if (h[`shippingNo${i}`] !== undefined) {
-      b[`FM出荷No${i}`] = h[`shippingNo${i}`];
-      b[`FM出荷No${fI}`] = h[`shippingNo${i}`];
-    }
-    if (h[`deliveryMethod${i}`] !== undefined) {
-      b[`配送方法${i}`] = h[`deliveryMethod${i}`];
-      b[`配送方法${fI}`] = h[`deliveryMethod${i}`];
+    const shipDate = h[`shipDate${i}`];
+    const deliveryDate = h[`deliveryDate${i}`];
+    const deliveryTime = h[`deliveryTime${i}`];
+    const informationNo = h[`informationNo${i}`];
+    const shippingNo = h[`shippingNo${i}`];
+    const deliveryMethod = h[`deliveryMethod${i}`];
+
+    // 何らかのデータがある行のみ追加
+    if (shipDate || deliveryDate || deliveryTime || informationNo || shippingNo || deliveryMethod) {
+        shippingDetails.push({
+            shipDate: shipDate || "",
+            deliveryDate: deliveryDate || "",
+            deliveryTime: deliveryTime || "",
+            informationNo: informationNo || "",
+            shippingNo: shippingNo || "",
+            deliveryMethod: deliveryMethod || ""
+        });
     }
   }
+
+  if (shippingDetails.length > 0) {
+      b['出荷配送詳細(JSON)'] = JSON.stringify(shippingDetails);
+  }
+  
   return b;
 }
 
