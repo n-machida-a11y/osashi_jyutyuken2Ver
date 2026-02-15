@@ -25,7 +25,7 @@ function doGet(e) {
   try { DriveApp.getFiles(); } catch (e) {} 
   var template = HtmlService.createTemplateFromFile('index');
   // デモ用ロジックのデフォルト値を維持
-  template.initialOrderNo = e.parameter.orderNo || "232922";
+  template.initialOrderNo = e.parameter.orderNo || "250969";
   template.initialSummaryCode = e.parameter.summaryCode || ""; 
   
   var paramUserName = e.parameter.userName || "";
@@ -245,7 +245,7 @@ function getOrderData(orderNo, summaryCode) {
 
       mapped.shipped = historyMap[mapped.id] ? historyMap[mapped.id].shipped : false; 
       return mapped; 
-    }).filter(item => { const qty = Number(item.quantity); return item.quantity !== "" && item.quantity != null && !isNaN(qty) && qty !== 0; });
+    }).filter(item => { return item.id && String(item.id).trim() !== ""; }); // 数量0でもIDがあれば表示する
     
     const scheduleData = getRelatedData(SHEETS.SCHEDULE).map(mapScheduleData), remarksData = getRelatedData(SHEETS.REMARKS).map(mapRemarkData), headerData = mapHeaderData(headerRowObj, mode, staffMap, customerNoteMap, customerMasterMap);
     // 合計計算（原価合計も追加）
@@ -296,7 +296,46 @@ function getProductMasterMap(ss) {
 
 function getStaffMap(ss) { const map = {}; try { const sheet = ss.getSheetByName(SHEETS.STAFF), values = sheet.getDataRange().getValues(), codeIdx = values[0].indexOf("担当者コード"), nameIdx = values[0].indexOf("担当者名"); for (let i = 1; i < values.length; i++) map[String(values[i][codeIdx]).trim()] = values[i][nameIdx]; } catch (e) {} return map; }
 function getCustomerNoteMap(ss) { const map = {}; try { const sheet = ss.getSheetByName(SHEETS.CUSTOMER), values = sheet.getDataRange().getValues(), codeIdx = values[0].indexOf("得意先コード"), noteIdx = values[0].indexOf("得意先備考"); for (let i = 1; i < values.length; i++) map[String(values[i][codeIdx]).trim()] = values[i][noteIdx]; } catch(e) {} return map; }
-function getCustomerMasterMap(ss) { const map = {}; try { const sheet = ss.getSheetByName(SHEETS.CUSTOMER), values = sheet.getDataRange().getValues(), codeIdx = values[0].indexOf("得意先コード"), collIdx = values[0].indexOf("回収日"), closeIdx = values[0].indexOf("請求締日"); for (let i = 1; i < values.length; i++) { const code = String(values[i][codeIdx]).trim(); if (code) map[code] = { collectionCode: collIdx !== -1 ? values[i][collIdx] : "", closingDate: closeIdx !== -1 ? values[i][closeIdx] : "" }; } } catch(e) {} return map; }
+
+function getCustomerMasterMap(ss) { 
+  const map = {}; 
+  try { 
+    const sheet = ss.getSheetByName(SHEETS.CUSTOMER);
+    const values = sheet.getDataRange().getValues();
+    const headers = values[0].map(h => String(h).trim());
+
+    // 各列のインデックスを取得
+    const codeIdx = headers.indexOf("得意先コード");
+    const collIdx = headers.indexOf("回収日");
+    const closeIdx = headers.indexOf("請求締日");
+    
+    // 追加: 基本情報のインデックス
+    const branchIdx = headers.indexOf("得意先名２"); // C列相当(支店名)
+    const zipIdx = headers.indexOf("郵便番号");      // H列相当
+    const addr1Idx = headers.indexOf("住所１");      // I列相当
+    const addr2Idx = headers.indexOf("住所２");      // J列相当
+    const telIdx = headers.indexOf("会社TEL");       // K列相当
+    const faxIdx = headers.indexOf("会社FAX");       // L列相当
+
+    for (let i = 1; i < values.length; i++) { 
+      const code = String(values[i][codeIdx]).trim(); 
+      if (code) {
+        map[code] = { 
+          collectionCode: collIdx !== -1 ? values[i][collIdx] : "", 
+          closingDate: closeIdx !== -1 ? values[i][closeIdx] : "",
+          branchName: branchIdx !== -1 ? values[i][branchIdx] : "",
+          zipCode: zipIdx !== -1 ? values[i][zipIdx] : "",
+          address1: addr1Idx !== -1 ? values[i][addr1Idx] : "",
+          address2: addr2Idx !== -1 ? values[i][addr2Idx] : "",
+          tel: telIdx !== -1 ? values[i][telIdx] : "",
+          fax: faxIdx !== -1 ? values[i][faxIdx] : ""
+        }; 
+      }
+    } 
+  } catch(e) {} 
+  return map; 
+}
+
 function createMockData(orderNo, mode, logs, msg) { return { success: false, mode: mode, header: { formId: "SYSTEM", title: msg, orderNo: orderNo || "---", dataStatus: 'official' }, items: [], schedule: [], remarks: [], totals: {subtotal:0, tax:0, total:0} }; }
 
 function saveOrderData(saveData) {
@@ -347,6 +386,9 @@ function mapHeaderData(row, mode, staffMap, customerNoteMap, customerMasterMap) 
   const code = getVal('得意先コード');
   const getStamp = (col, label) => ({ status: getVal(col) === '済' ? '済' : '', name: getVal(col) === '済' ? label : '', date: "" });
   
+  // 得意先マスタから詳細情報を取得
+  const custInfo = customerMasterMap[code] || {};
+
   const ships = {};
   for (let i = 1; i <= 10; i++) { 
     // スプレッドシートの列名が半角(出荷日1)か全角(出荷日１)かに関わらず取得できるようにする
@@ -356,11 +398,15 @@ function mapHeaderData(row, mode, staffMap, customerNoteMap, customerMasterMap) 
     ships[`shipDate${i}`] = getVal(`出荷日${i}`) || getVal(`出荷日${fI}`); 
     ships[`deliveryDate${i}`] = getVal(`納期${i}`) || getVal(`納期${fI}`); 
     ships[`deliveryTime${i}`] = getVal(`時間帯${i}`) || getVal(`時間帯${fI}`); 
-    ships[`informationNo${i}`] = getVal(`情報No${i}`) || getVal(`情報No${fI}`); 
-    ships[`shippingNo${i}`] = getVal(`出荷No${i}`) || getVal(`出荷No${fI}`); 
+    // FM列を参照するように変更
+    ships[`informationNo${i}`] = getVal(`FM情報No${i}`) || getVal(`FM情報No${fI}`) || getVal(`情報No${i}`) || getVal(`情報No${fI}`); 
+    ships[`shippingNo${i}`] = getVal(`FM出荷No${i}`) || getVal(`FM出荷No${fI}`) || getVal(`出荷No${i}`) || getVal(`出荷No${fI}`); 
     ships[`deliveryMethod${i}`] = getVal(`配送方法${i}`) || getVal(`配送方法${fI}`); 
   }
   
+  // 担当者コードから担当営業名を解決
+  const salesRepName = staffMap[getVal('担当者コード')] || getVal('担当者コード');
+
   return { 
     formId: "様式 03-3BU-004-6 170410", 
     title: mode === 'sales' ? "受注兼発送依頼書" : (mode === 'rental' ? "レンタル受注兼発送依頼書" : "通信費 受注兼発送依頼書"), 
@@ -369,28 +415,35 @@ function mapHeaderData(row, mode, staffMap, customerNoteMap, customerMasterMap) 
     date: formatDate(row['受注日']), 
     customerCode: code, 
     customerName: getVal('得意先名'), 
-    branchName: getVal('支店名'), 
-    customerZipCode: getVal('郵便番号'), 
-    customerAddress: (getVal('住所１')||"") + (getVal('住所２')||""), 
-    customerTel: getVal('会社TEL'), 
-    customerFax: getVal('会社FAX'), 
+    
+    // 得意先マスタから取得
+    branchName: custInfo.branchName || "", 
+    customerZipCode: custInfo.zipCode || "", 
+    customerAddress: (custInfo.address1 || "") + (custInfo.address2 || ""), 
+    customerTel: custInfo.tel || "", 
+    customerFax: custInfo.fax || "", 
+    
     customerNote: customerNoteMap[code] || "", 
     
+    // 直送先情報（受注データの指定列から取得）
     shipName: getVal('直送先名'), 
-    shipAddress: getVal('直送先名称_出荷明細') || (getVal('直送先住所１') + getVal('直送先住所２')) || "", 
-    shipTel: getVal('直送先TEL'), 
+    shipCode: getVal('直送先コード'), 
+    // ユーザー指示: 郵便番号 住所１ 住所２ 会社TEL という列名から取ってきてほしい
+    // 直送先住所欄には郵便番号入力欄がないため、住所テキストに結合して表示する
+    shipAddress: (getVal('郵便番号') ? "〒" + getVal('郵便番号') + " " : "") + (getVal('住所１') || "") + (getVal('住所２') || ""), 
+    shipTel: getVal('会社TEL'), 
     shipRep: getVal('直送先担当者名') || "", 
     
-    salesRepInternalMain: staffMap[getVal('担当者コード')] || getVal('担当者コード'), 
-    salesRep: getVal('担当営業'), 
+    salesRepInternalMain: salesRepName, 
+    salesRep: salesRepName, // 担当者コードから引いた名前をセット
     salesRepClient: getVal('先方担当者名'),
     internalMemo: getVal('技術課依頼'), // 技術課依頼書のバインディング追加
     
     orderNoClient: getVal('注文No'),
     endUser: getVal('E/U'),
     
-    closingDate: getVal('請求締日') || (customerMasterMap[code]?.closingDate), 
-    paymentDate: getVal('支払日') || convertCollectionDate(customerMasterMap[code]?.collectionCode), 
+    closingDate: getVal('請求締日') || (custInfo.closingDate), 
+    paymentDate: getVal('支払日') || convertCollectionDate(custInfo.collectionCode), 
     collectionMethod: getVal('回収種別１'), 
     dataStatus: getVal('データステータス') || 'official', 
     rentalId: getVal('レンタルID'), 
@@ -406,8 +459,10 @@ function mapHeaderData(row, mode, staffMap, customerNoteMap, customerMasterMap) 
     approvalDirector: getStamp('部長承認', '部長'), 
     approvalPresident: getStamp('社長承認', '社長'), 
     
-    salesDate: getVal('売上日'), 
-    headerSlipNo: getVal('伝票No'), 
+    // 売上日を「受注日」の値に変更
+    salesDate: formatDate(row['受注日']), 
+    // 伝票Noの取得を強化（半角・全角）
+    headerSlipNo: getVal('伝票No') || getVal('伝票Ｎｏ'), 
     totalCost: row['原価合計'] || '', 
     ...ships 
   };
@@ -439,8 +494,9 @@ function reverseMapHeader(h) {
     '得意先備考': h.customerNote, 
     '売上日': h.salesDate, 
     '伝票No': h.headerSlipNo, 
+    '直送先コード': h.shipCode, 
     '原価合計': h.totalCost, 
-    '担当営業': h.salesRep,
+    '担当営業': h.salesRep, // ※担当営業は保存時には文字情報として保存されるが、本来は担当者コードとして保存すべきかは要件による(今回はUIからの保存を優先)
     '注文No': h.orderNoClient,
     'E/U': h.endUser,
     '技術課依頼': h.internalMemo, // 保存項目追加
@@ -466,13 +522,14 @@ function reverseMapHeader(h) {
       b[`時間帯${i}`] = h[`deliveryTime${i}`];
       b[`時間帯${fI}`] = h[`deliveryTime${i}`];
     }
+    // 保存先をFM列に変更
     if (h[`informationNo${i}`] !== undefined) {
-      b[`情報No${i}`] = h[`informationNo${i}`];
-      b[`情報No${fI}`] = h[`informationNo${i}`];
+      b[`FM情報No${i}`] = h[`informationNo${i}`];
+      b[`FM情報No${fI}`] = h[`informationNo${i}`];
     }
     if (h[`shippingNo${i}`] !== undefined) {
-      b[`出荷No${i}`] = h[`shippingNo${i}`];
-      b[`出荷No${fI}`] = h[`shippingNo${i}`];
+      b[`FM出荷No${i}`] = h[`shippingNo${i}`];
+      b[`FM出荷No${fI}`] = h[`shippingNo${i}`];
     }
     if (h[`deliveryMethod${i}`] !== undefined) {
       b[`配送方法${i}`] = h[`deliveryMethod${i}`];
