@@ -44,8 +44,33 @@
     <datalist id="closing-dates"><option value="10日"/><option value="20日"/><option value="末日"/></datalist>
     <datalist id="payment-dates"><option value="当月末"/><option value="翌月10日"/><option value="翌月20日"/><option value="翌月末"/><option value="翌々月10日"/></datalist>
     <datalist id="shipping-methods"><option value="※工場出荷無し"/><option value="ヤマト(PM)"/><option value="出荷庫準備"/><option value="レターパック"/><option value="航空便"/><option value="ヤマト(AM)"/><option value="佐川"/></datalist>
+    
+    <!-- 追加: 技術課依頼の選択肢 -->
+    <datalist id="tech-requests">
+        <option value="機械器具設置"/>
+        <option value="電気通信"/>
+        <option value="保守点検"/>
+        <option value="修繕"/>
+        <option value="その他"/>
+    </datalist>
+
+    <!-- 追加: 支払条件詳細の選択肢 -->
+    <datalist id="payment-details">
+        <option value="現金"/>
+        <option value="手形　サイト90日"/>
+        <option value="手形　サイト120日"/>
+        <option value="手形　サイト115日"/>
+        <option value="10万以上手形　サイト70日"/>
+        <option value="10万以上手形　サイト90日"/>
+        <option value="10万以上手形　サイト97日"/>
+        <option value="10万以上手形　サイト120日"/>
+        <option value="50万以上半金半手サイト115日"/>
+        <option value="10万以上手形"/>
+        <option value="手形"/>
+    </datalist>
+
     <script type="text/babel" data-presets="react,typescript">
-      const { useState, useEffect, useMemo, useRef } = React;
+      const { useState, useEffect, useMemo, useRef, useLayoutEffect } = React;
       const generateId = () => crypto.randomUUID();
       const safeText = (val) => (val === undefined || val === null) ? '' : String(val);
       const gasDataEl = document.getElementById('gas-data');
@@ -102,8 +127,24 @@
         const [showResults, setShowResults] = useState(false);
         const [loading, setLoading] = useState(false);
         const wrapperRef = useRef(null);
+        const textareaRef = useRef(null);
+
+        // 高さ調整関数
+        const adjustHeight = () => {
+            const el = textareaRef.current;
+            if (el) {
+                el.style.height = 'auto'; // 一旦autoにして縮小に対応
+                el.style.height = el.scrollHeight + 'px'; // 内容に合わせて高さを設定
+            }
+        };
 
         useEffect(() => { setQuery(value || ''); }, [value]);
+        
+        // value（query）が変わったとき、および初期表示時に高さを調整
+        useLayoutEffect(() => {
+            adjustHeight();
+        }, [query]);
+
         useEffect(() => {
             const handleClickOutside = (event) => { if (wrapperRef.current && !wrapperRef.current.contains(event.target)) setShowResults(false); };
             document.addEventListener("mousedown", handleClickOutside);
@@ -137,8 +178,20 @@
         };
 
         return (
-            <div ref={wrapperRef} className="relative w-full">
-                <input type="text" className={className} value={query} onChange={(e) => { if(!readOnly) handleSearch(e.target.value); }} onFocus={() => !readOnly && query && setShowResults(true)} placeholder={placeholder} readOnly={readOnly} />
+            <div ref={wrapperRef} className="relative w-full h-full flex items-center">
+                <textarea 
+                    ref={textareaRef}
+                    className={`${className} resize-none overflow-hidden align-middle leading-normal py-1`} 
+                    style={{minHeight: '28px', height: 'auto'}}
+                    rows={1}
+                    value={query} 
+                    onChange={(e) => { 
+                        if(!readOnly) handleSearch(e.target.value); 
+                    }} 
+                    onFocus={() => !readOnly && query && setShowResults(true)} 
+                    placeholder={placeholder} 
+                    readOnly={readOnly} 
+                />
                 {!readOnly && showResults && (
                     <div className="absolute z-50 left-0 top-full mt-1 w-[400px] bg-white border border-gray-300 rounded shadow-lg suggestion-list">
                         {loading ? <div className="p-2 text-xs text-gray-500 text-center">検索中...</div> : (
@@ -290,7 +343,7 @@
         const handleApproveAction = (stampType, stampLabel) => {
           setConfirmState({ isOpen: true, message: `「${stampLabel}」として承認してよろしいですか？`, onConfirm: () => { if (typeof google !== 'undefined' && google.script) google.script.run.withSuccessHandler((res) => { if(res.success) updateHeader(`approval${stampType}`, { status: '済', name: stampLabel, date: "" }); }).approveOrder(header.orderNo, stampType, stampLabel); setConfirmState({ isOpen: false }); }, onCancel: () => setConfirmState({ isOpen: false }) });
         }
-        const canApprove = (type) => { const info = header[`approval${type}`]; if(info && info.status === '済') return false; if (type === 'Creator') return true; if (CONFIG.userTitle === '営業担当者' && type === 'Check') return true; if (CONFIG.userTitle === '課長' && (type === 'Manager' || type === 'Director')) return true; if (CONFIG.userTitle.includes('社長') && type === 'President') return true; return false; }
+        const canApprove = (type) => { const info = header[`approval${type}`]; if(info && info.status === '済') return false; if (type === 'Creator') return true; if (type === 'Staff') return true; if (CONFIG.userTitle === '営業担当者' && type === 'Check') return true; if (CONFIG.userTitle === '課長' && (type === 'Manager' || type === 'Director')) return true; if (CONFIG.userTitle.includes('社長') && type === 'President') return true; return false; }
 
         const Stamp = ({ title, info, stampKey, className }) => (
           <div className={`flex flex-col items-center justify-between border-l border-black w-14 h-20 bg-white ${className}`}>
@@ -311,7 +364,9 @@
           </div>
         );
 
-        const gridColsClass = 'grid-cols-[30px_85px_minmax(150px,1.5fr)_50px_50px_80px_80px_80px_80px_minmax(100px,1fr)_60px]';
+        // gridColsClassの変更: 13カラム
+        // 操作(30), 取引日(85), 品名(auto), 数量(40), 単位(40), 単価(70), 金額(70), 製造No(70), 品名詳細(100), 手配日(85), 原価単価(70), 原価金額(70), 掛率(50)
+        const gridColsClass = 'grid-cols-[30px_85px_minmax(120px,1.5fr)_40px_40px_70px_70px_70px_minmax(100px,1fr)_85px_70px_70px_50px]';
 
         const getStatusBadge = () => {
             if (header.dataStatus === '提出済み') return <span className="bg-blue-600 text-white px-2 py-1 rounded text-xs font-bold">提出済</span>;
@@ -401,7 +456,7 @@
                     <div className="text-xs mb-1">提出日: <span className="font-mono border-b border-gray-300 px-2">{safeText(header.date)}</span></div>
                     <div className="flex border border-black shadow-sm">
                       <Stamp title="作成" info={header.approvalCreator} stampKey="Creator" />
-                      <Stamp title="本社事務" info={header.approvalStaff} />
+                      <Stamp title="本社事務" info={header.approvalStaff} stampKey="Staff" />
                       <Stamp title="営業" info={header.approvalCheck} stampKey="Check" />
                       <Stamp title="課長" info={header.approvalManager} stampKey="Manager" />
                       <Stamp title="部長" info={header.approvalDirector} stampKey="Director" />
@@ -485,60 +540,62 @@
                   </div>
                 </div>}
                 
-                {/* 自動反映情報の表示エリア */}
-                <div className="flex gap-4 mb-2 text-xs font-mono text-gray-700">
-                    <div>注文No: <span className="border-b border-gray-300 px-1">{header.orderNoClient || ''}</span></div>
-                    <div>E/U: <span className="border-b border-gray-300 px-1">{header.endUser || ''}</span></div>
-                    <div>現場名: <span className="border-b border-gray-300 px-1">{header.siteName || ''}</span></div>
-                </div>
 
                 <div className="border-2 border-black mb-6">
                   <div className={`grid ${gridColsClass} bg-label border-b border-black text-center font-bold py-2 text-sm`}>
                     <div className="text-[10px] text-gray-500">操作</div>
-                    <div className="border-l border-black border-r px-1 text-[10px] flex items-center justify-center">取引年月日</div>
+                    <div className="border-l border-black border-r px-1 flex items-center justify-center">取引年月日</div>
                     <div className="border-r border-black px-1">品 名</div>
                     <div className="border-r border-black">数量</div>
                     <div className="border-r border-black">単位</div>
                     <div className="border-r border-black">単価</div>
                     <div className="border-r border-black">金額</div>
+                    <div className="border-r border-black">製造依頼№</div>
+                    <div className="border-r border-black">品名・製造№等</div>
+                    <div className="border-r border-black">手配日</div>
                     <div className="border-r border-black">原価単価</div>
-                    <div className="border-r border-black">原価</div>
-                    <div className="border-r border-black">備考</div>
+                    <div className="border-r border-black">原価金額</div>
                     <div className="">掛率</div>
                   </div>
                   {items.map((row, i) => (
-                    <div key={row.id} className={`grid ${gridColsClass} border-b border-black last:border-none text-sm min-h-[32px] group items-center`}>
-                        <div className="flex justify-center">
+                    <div key={row.id} className={`grid ${gridColsClass} border-b border-black last:border-none text-sm min-h-[32px] group`}>
+                        <div className="flex justify-center items-center">
                             <button onClick={() => deleteItem(i)} className={`opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 print:hidden ${isLocked ? 'hidden' : ''}`}><Trash2 className="w-4 h-4" /></button>
                         </div>
-                        <div className="border-l border-black border-r p-1">
+                        <div className="border-l border-black border-r p-1 flex items-center">
                             <input className={`w-full text-center bg-transparent outline-none text-xs font-mono ${items[i].shipped ? 'text-green-600 font-bold' : ''}`} value={row.transactionDate || ''} onChange={e => updateItem(i, 'transactionDate', e.target.value)} placeholder="MM/DD" readOnly={isLocked} />
                         </div>
-                        <div className="border-r border-black p-1 pl-3">
+                        <div className="border-r border-black p-1 pl-3 h-full flex items-center">
                             <ProductSearchInput className={`w-full bg-transparent outline-none font-medium ${isLocked ? 'text-gray-500' : ''}`} value={row.productName || ''} onSelect={(item) => handleProductSelect(i, item)} readOnly={isLocked} placeholder="" />
                         </div>
-                        <div className="border-r border-black p-1">
+                        <div className="border-r border-black p-1 flex items-center">
                             <NumberInput className="w-full bg-transparent outline-none font-mono" value={row.quantity || ''} onChange={v => updateItem(i, 'quantity', v)} readOnly={isLocked} />
                         </div>
-                        <div className="border-r border-black p-1">
+                        <div className="border-r border-black p-1 flex items-center justify-center">
                             <input className="w-full text-center bg-transparent outline-none" value={row.unit || ''} onChange={e => updateItem(i, 'unit', e.target.value)} readOnly={isLocked} />
                         </div>
-                        <div className="border-r border-black p-1">
+                        <div className="border-r border-black p-1 flex items-center">
                             <NumberInput className="w-full bg-transparent outline-none font-mono" value={row.unitPrice || ''} onChange={v => updateItem(i, 'unitPrice', v)} readOnly={isLocked} isMasked={isTemporary} />
                         </div>
-                        <div className="border-r border-black p-1 px-2 text-right font-mono font-bold">
+                        <div className="border-r border-black p-1 px-2 text-right font-mono font-bold flex items-center justify-end">
                             {isTemporary ? '0' : (row.amount ? Number(row.amount).toLocaleString() : '')}
                         </div>
-                        <div className="border-r border-black p-1">
-                            <NumberInput className="w-full bg-transparent outline-none font-mono text-xs text-gray-500" value={row.costPrice || ''} onChange={v => updateItem(i, 'costPrice', v)} readOnly={isLocked} />
+                        <div className="border-r border-black p-1 flex items-center">
+                            <input className="w-full text-center bg-transparent outline-none text-xs" value={row.manufacturingNo || ''} onChange={e => updateItem(i, 'manufacturingNo', e.target.value)} readOnly={isLocked} />
                         </div>
-                        <div className="border-r border-black p-1">
-                            <NumberInput className="w-full bg-transparent outline-none font-mono text-xs text-gray-500" value={row.costAmount || ''} onChange={v => updateItem(i, 'costAmount', v)} readOnly={isLocked} />
-                        </div>
-                        <div className="border-r border-black px-2 text-xs truncate">
+                        <div className="border-r border-black px-2 text-xs truncate flex items-center">
                             <input className="w-full bg-transparent outline-none" value={row.note || ''} onChange={e => updateItem(i, 'note', e.target.value)} readOnly={isLocked} />
                         </div>
-                        <div className="p-1 text-center font-mono text-xs">
+                        <div className="border-r border-black p-1 flex items-center">
+                            <input className="w-full text-center bg-transparent outline-none text-xs font-mono" value={row.arrangementDate || ''} onChange={e => updateItem(i, 'arrangementDate', e.target.value)} placeholder="MM/DD" readOnly={isLocked} />
+                        </div>
+                        <div className="border-r border-black p-1 flex items-center">
+                            <NumberInput className="w-full bg-transparent outline-none font-mono text-xs text-gray-500" value={row.costPrice || ''} onChange={v => updateItem(i, 'costPrice', v)} readOnly={isLocked} />
+                        </div>
+                        <div className="border-r border-black p-1 flex items-center">
+                            <NumberInput className="w-full bg-transparent outline-none font-mono text-xs text-gray-500" value={row.costAmount || ''} onChange={v => updateItem(i, 'costAmount', v)} readOnly={isLocked} />
+                        </div>
+                        <div className="p-1 text-center font-mono text-xs flex items-center justify-center">
                              {row.costRate ? `${row.costRate}%` : '-'}
                         </div>
                     </div>
@@ -553,16 +610,18 @@
                        <div className="border-r border-black"></div> {/* 単位 */}
                        <div className="border-r border-black"></div> {/* 単価 */}
                        <div className="border-r border-black"></div> {/* 金額 */}
+                       <div className="border-r border-black"></div> {/* 製造No */}
+                       <div className="border-r border-black"></div> {/* 品名詳細 */}
+                       <div className="border-r border-black"></div> {/* 手配日 */}
                        <div className="border-r border-black"></div> {/* 原価単価 */}
-                       <div className="border-r border-black p-1"> {/* 原価金額 */}
+                       <div className="border-r border-black p-1 flex items-center"> {/* 原価金額 */}
                           <NumberInput className="w-full bg-transparent outline-none font-mono text-xs text-gray-900 font-bold" value={header.totalCost} onChange={(v) => updateHeader('totalCost', v)} readOnly={isLocked} isMasked={isTemporary} />
                        </div>
-                       <div className="border-r border-black"></div> {/* 備考 */}
                        <div></div> {/* 掛率 */}
                     </div>
                   )}
 
-                  {[...Array(Math.max(0, 5 - items.length))].map((_, i) => <div key={`empty-${i}`} className={`grid ${gridColsClass} border-b border-black last:border-none text-sm min-h-[32px]`}><div/><div className="border-l border-black border-r"/><div className="border-r border-black"/><div className="border-r border-black"/><div className="border-r border-black"/><div className="border-r border-black font-mono"/><div className="border-r border-black"/><div className="border-r border-black"/><div className="border-r border-black"/><div className="border-r border-black"/><div/></div>)}
+                  {[...Array(Math.max(0, 5 - items.length))].map((_, i) => <div key={`empty-${i}`} className={`grid ${gridColsClass} border-b border-black last:border-none text-sm min-h-[32px]`}><div/><div className="border-l border-black border-r"/><div className="border-r border-black"/><div className="border-r border-black"/><div className="border-r border-black"/><div className="border-r border-black font-mono"/><div className="border-r border-black"/><div className="border-r border-black"/><div className="border-r border-black"/><div className="border-r border-black"/><div className="border-r border-black"/><div className="border-r border-black"/><div/></div>)}
                   
                   {mode === 'sales' ? 
                     <div className="border-t border-black bg-gray-50 text-sm">
@@ -694,4 +753,4 @@
       ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     </script>
   </body>
-</html>
+</html>"
