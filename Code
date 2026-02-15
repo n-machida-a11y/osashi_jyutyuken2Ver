@@ -260,7 +260,7 @@ function getOrderData(orderNo, summaryCode) {
 function approveOrder(orderNo, stampType, userName) {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const colMap = { 'Creator': '作成者承認', 'Check': '営業担当者承認', 'Manager': '課長承認', 'Director': '部長承認', 'President': '社長承認' };
+    const colMap = { 'Creator': '作成者承認', 'Staff': '本社事務承認', 'Check': '営業担当者承認', 'Manager': '課長承認', 'Director': '部長承認', 'President': '社長承認' };
     const colName = colMap[stampType];
     const update = {};
     update[colName] = "済"; // AppSheet連動のため「済」を上書き
@@ -361,12 +361,14 @@ function saveOrderData(saveData) {
             '単価': item.unitPrice, 
             '受注金額': item.amount, 
             '原価金額': item.costAmount, 
-            '備考': item.note, 
+            '品名・製造№等': item.note, // UI上は「品名・製造№等」だがDB上は「備考」
             '種別': saveData.mode, 
             '取引年月日': item.transactionDate,
-            // 新設列対応（スプレッドシートに列が存在する場合のみ書き込まれる）
             '原価単価': item.costPrice,
-            '掛率': item.costRate
+            '掛率': item.costRate,
+            // 新規項目
+            '製造依頼№': item.manufacturingNo, 
+            '手配日': item.arrangementDate
         }); 
     });
     saveData.schedule.forEach(sch => { if(!sch.id || String(sch.id).startsWith('pad-')) return; updateOrAddRow(ss, SHEETS.SCHEDULE, '請求ID', sch.id, { '受注No': orderNo, '請求ID': sch.id, '回数': sch.count, '請求売上日': sch.billingDate, '請求金額': sch.amount, '原価金額': sch.costReference, '伝票No': sch.slipNo, '締め日': sch.closingDate, 'チェック状況': sch.checkStatus, '種別': saveData.mode, '行受注No': sch.rowOrderNo, '備考': sch.note }); });
@@ -392,7 +394,7 @@ function mapHeaderData(row, mode, staffMap, customerNoteMap, customerMasterMap) 
   const ships = {};
   
   // ★JSONカラムからの展開処理 (旧フラット構造を廃止しJSON統合)
-  const jsonVal = getVal('出荷配送詳細(JSON)');
+  const jsonVal = getVal('出荷配送詳細(JSON)'); // 実際のシートの列名に合わせてください（例: "出荷指示JSON" ならそちらに変更）
   let loadedFromJson = false;
   if (jsonVal) {
     try {
@@ -414,7 +416,7 @@ function mapHeaderData(row, mode, staffMap, customerNoteMap, customerMasterMap) 
     }
   }
 
-  // JSONがない、またはパース失敗時のためのフォールバック(移行期用)
+  // JSONがない、またはパース失敗時のためのフォールバック(移行期用: 念のため残すが、JSON優先)
   if (!loadedFromJson) {
     for (let i = 1; i <= 10; i++) { 
       // スプレッドシートの列名が半角(出荷日1)か全角(出荷日１)かに関わらず取得できるようにする
@@ -489,7 +491,7 @@ function mapHeaderData(row, mode, staffMap, customerNoteMap, customerMasterMap) 
     periodStartDate: getVal('期間開始'), 
     periodEndDate: getVal('期間終了'), 
     
-    approvalStaff: { status: '', name: getVal('入力者') || '' }, 
+    approvalStaff: getStamp('本社事務承認', '本社事務'), // 入力者から本社事務承認へ変更
     
     approvalCreator: getStamp('作成者承認', '作成'), 
     approvalCheck: getStamp('営業担当者承認', '確認'), 
@@ -539,6 +541,7 @@ function reverseMapHeader(h) {
     'E/U': h.endUser,
     '技術課依頼': h.internalMemo, // 保存項目追加
     '作成者承認': h.approvalCreator?.status === '済' ? '済' : '', 
+    '本社事務承認': h.approvalStaff?.status === '済' ? '済' : '', // 本社事務承認を保存
     '営業担当者承認': h.approvalCheck?.status === '済' ? '済' : '', 
     '課長承認': h.approvalManager?.status === '済' ? '済' : '', 
     '部長承認': h.approvalDirector?.status === '済' ? '済' : '', 
@@ -588,11 +591,14 @@ function mapItemData(row) {
         unitPrice: row['単価'], 
         amount: row['受注金額'], 
         costAmount: row['原価金額'], 
-        note: row['備考'], 
+        note: row['品名・製造№等'] || row['備考'], 
         transactionDate: formatDate(row['取引年月日']),
         // 新設項目の読み込み（列が存在しない場合はundefined/空になる）
         costPrice: (row._raw && row._raw[12]) ? row._raw[12] : (row['原価単価'] || row['原価'] || ''), // M列=12
-        costRate: row['掛率'] // ★ここを自動計算ロジックのみに頼るなら削除しても良いが、一応残して上書きする方針
+        costRate: row['掛率'],
+        // 新規項目
+        manufacturingNo: row['製造依頼№'],
+        arrangementDate: formatDate(row['手配日'])
     }; 
 }
 function mapScheduleData(row) { return { id: row['請求ID'], count: row['回数'], billingDate: formatDate(row['請求売上日']), amount: row['請求金額'], costReference: row['原価金額'], slipNo: row['伝票No'], closingDate: formatDate(row['締め日']), checkStatus: row['チェック状況'], rowOrderNo: row['行受注No'], note: row['備考'] }; }
